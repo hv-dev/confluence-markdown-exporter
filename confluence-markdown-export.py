@@ -17,7 +17,7 @@ class ExportException(Exception):
 
 
 class Exporter:
-    def __init__(self, url, username, token, out_dir, space, no_attach):
+    def __init__(self, url, username, token, out_dir, page_id, space, no_attach):
         self.__out_dir = out_dir
         self.__parsed_url = urlparse(url)
         self.__username = username
@@ -27,6 +27,7 @@ class Exporter:
                                        password=self.__token)
         self.__seen = set()
         self.__no_attach = no_attach
+        self.__page_id = page_id
         self.__space = space
 
     def __sanitize_filename(self, document_name_raw):
@@ -51,7 +52,6 @@ class Exporter:
         # see if there are any children
         child_ids = self.__confluence.get_child_id_list(page_id)
     
-        content = page["body"]["storage"]["value"]
 
         # save all files as .html for now, we will convert them later
         extension = ".html"
@@ -66,7 +66,7 @@ class Exporter:
 
         page_location = sanitized_parents + [sanitized_filename]
         page_filename = os.path.join(self.__out_dir, *page_location)
-
+        content = page["body"]["storage"]["value"]
         page_output_dir = os.path.dirname(page_filename)
         os.makedirs(page_output_dir, exist_ok=True)
         print("Saving to {}".format(" / ".join(page_location)))
@@ -76,7 +76,7 @@ class Exporter:
         # fetch attachments unless disabled
         if not self.__no_attach:
             ret = self.__confluence.get_attachments_from_content(page_id, start=0, limit=500, expand=None,
-                                                                 filename=None, media_type=None)
+                                                                filename=None, media_type=None)
             for i in ret["results"]:
                 att_title = i["title"]
                 download = i["_links"]["download"]
@@ -114,24 +114,37 @@ class Exporter:
 
     def __dump_space(self, space):
         space_key = space["key"]
-        print("Processing space", space_key)
-        if space.get("homepage") is None:
-            print("Skipping space: {}, no homepage found!".format(space_key))
-            print("In order for this tool to work there has to be a root page!")
-            raise ExportException("No homepage found")
+        if self.__page_id:
+            page_id = self.__page_id
+            closest_parent = self.__confluence.get_page_ancestors(page_id)[-1]["title"]
+            self.__dump_page(page_id, parents=[space_key, closest_parent])
         else:
-            # homepage found, recurse from there
-            homepage_id = space["homepage"]["id"]
-            self.__dump_page(homepage_id, parents=[space_key])
+            print("Processing space", space_key)
+            if space.get("homepage") is None:
+                print("Skipping space: {}, no homepage found!".format(space_key))
+                print("In order for this tool to work there has to be a root page!")
+                raise ExportException("No homepage found")
+            else:
+                # homepage found, recurse from there
+                homepage_id = space["homepage"]["id"]
+                print(space_key)
+                self.__dump_page(homepage_id, parents=[space_key])
 
     
     def dump(self):
-        ret = self.__confluence.get_all_spaces(start=0, limit=500, expand='description.plain,homepage')
-        if ret['size'] == 0:
-            print("No spaces found in confluence. Please check credentials")
-        for space in ret["results"]:
-            if self.__space is None or space["key"] == self.__space:
+        if self.__space is None:
+            ret = self.__confluence.get_all_spaces(start=0, limit=500, expand='description.plain,homepage')
+            if ret['size'] == 0:
+                print("No spaces found in confluence. Please check credentials")
+            for space in ret["results"]:
+                if space["key"] == self.__space:
+                    self.__dump_space(space)
+        else:
+            space = self.__confluence.get_space(self.__space)
+            if space:
                 self.__dump_space(space)
+            else:
+                print("Space not found, please check provdided space")
 
 
 class Converter:
@@ -193,6 +206,7 @@ if __name__ == "__main__":
     parser.add_argument("username", type=str, help="The username")
     parser.add_argument("token", type=str, help="The access token to Confluence")
     parser.add_argument("out_dir", type=str, help="The directory to output the files to")
+    parser.add_argument("--page-id", type=str, required=False, dest="page_id", default=None, help="Page ID to export")
     parser.add_argument("--space", type=str, required=False, default=None, help="Spaces to export")
     parser.add_argument("--skip-attachments", action="store_true", dest="no_attach", required=False,
                         default=False, help="Skip fetching attachments")
@@ -202,7 +216,7 @@ if __name__ == "__main__":
     
     if not args.no_fetch:
         dumper = Exporter(url=args.url, username=args.username, token=args.token, out_dir=args.out_dir,
-                          space=args.space, no_attach=args.no_attach)
+                          page_id=args.page_id, space=args.space, no_attach=args.no_attach)
         dumper.dump()
     
     converter = Converter(out_dir=args.out_dir)
