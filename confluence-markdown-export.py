@@ -148,8 +148,9 @@ class Exporter:
 
 
 class Converter:
-    def __init__(self, out_dir):
+    def __init__(self, out_dir, delete_html):
         self.__out_dir = out_dir
+        self.__delete_html = delete_html
 
     def recurse_findfiles(self, path):
         for entry in os.scandir(path):
@@ -199,6 +200,10 @@ class Converter:
             with open(newname + ".md", "w", encoding="utf-8") as f:
                 f.write(md)
 
+            if self.__delete_html and os.path.exists(path) and os.path.exists(newname + ".md"):
+                print("Removing: ", path.split("/")[-1])
+                os.remove(path)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -212,6 +217,8 @@ if __name__ == "__main__":
                         default=False, help="Skip fetching attachments")
     parser.add_argument("--no-fetch", action="store_true", dest="no_fetch", required=False,
                         default=False, help="This option only runs the markdown conversion")
+    parser.add_argument("--delete-html", action="store_true", dest="delete_html", required=False,
+                        default=False, help="This option deletes the original html files after the markdown conversion")
     args = parser.parse_args()
     
     if not args.no_fetch:
@@ -219,5 +226,5 @@ if __name__ == "__main__":
                           page_id=args.page_id, space=args.space, no_attach=args.no_attach)
         dumper.dump()
     
-    converter = Converter(out_dir=args.out_dir)
+    converter = Converter(out_dir=args.out_dir, delete_html=args.delete_html)
     converter.convert()
